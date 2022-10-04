@@ -1,0 +1,2 @@
+CREATE DATABASE hg_assignment1
+USE hg_assignment1
