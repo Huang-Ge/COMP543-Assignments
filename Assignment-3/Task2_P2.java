@@ -16,8 +16,9 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.conf.Configured;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
-import java.util.regex.Matcher;
+import java.util.Comparator;
+import java.util.PriorityQueue;
+
 
 public class RevenueCount extends Configured implements Tool {
 
@@ -50,7 +51,7 @@ public class RevenueCount extends Configured implements Tool {
     }
 
     public static class RevenueMapper
-            extends Mapper<Object, Text, Text, DoubleWritable> {
+            extends Mapper<Object, Text, Text, Text> {
 
         private Text key_for_write = new Text();
         private Text top_5_revenues = new Text();
@@ -100,80 +101,80 @@ public class RevenueCount extends Configured implements Tool {
     }
 
 
-        public static class RevenueReducer
-                extends Reducer<Text, DoubleWritable, Text, DoubleWritable> {
+    public static class RevenueReducer
+            extends Reducer<Text, Text, Text, Text> {
 
-            private Text outputID = new Text();
-            private Text revenue = new Text();
+        private Text outputID = new Text();
+        private Text revenue = new Text();
 
-            public void reduce(Text key, Iterable<DoubleWritable> values,
-                               Context context
-            ) throws IOException, InterruptedException {
-                PriorityQueue<TaxiDriver> heap = new PriorityQueue<>(new Compare());
-                for (DoubleWritable val : values) {
-                    String s = val.toString();
-                    String taxiID = s.split(",")[0];
-                    Double revenue = Double.parseDouble(s.split(",")[1]);
+        public void reduce(Text key, Iterable<Text> values,
+                           Context context
+        ) throws IOException, InterruptedException {
+            PriorityQueue<TaxiDriver> heap = new PriorityQueue<>(new Compare());
+            for (Text val : values) {
+                String s = val.toString();
+                String taxiID = s.split(",")[0];
+                Double revenue = Double.parseDouble(s.split(",")[1]);
 
-                    if (heap.size() < 5) {
+                if (heap.size() < 5) {
+                    heap.add(new TaxiDriver(taxiID, revenue));
+                } else {
+                    if (revenue > heap.peek().revenue) {
+                        heap.poll();
                         heap.add(new TaxiDriver(taxiID, revenue));
-                    } else {
-                        if (revenue > heap.peek().revenue) {
-                            heap.poll();
-                            heap.add(new TaxiDriver(taxiID, revenue));
-                        }
                     }
                 }
-                for (TaxiDriver td : heap) {
+            }
+            for (TaxiDriver td : heap) {
                 outputID.set(td.id);
                 revenue.set(td.revenue.toString());
                 context.write(outputID, revenue);
             }
-            }
-
         }
 
-        public int run(String[] args) throws Exception {
+    }
 
-            Configuration conf = new Configuration();
-            Job job = Job.getInstance(conf, "Revenue count");
-            job.setJarByClass(RevenueCount.class);
-            job.setMapperClass(RevenueMapper.class);
-            //job.setCombinerClass(RevenueReducer.class);
-            job.setReducerClass(RevenueReducer.class);
-            job.setOutputKeyClass(Text.class);
-            job.setOutputValueClass(DoubleWritable.class);
+    public int run(String[] args) throws Exception {
 
-            List<String> other_args = new ArrayList<String>();
-            for (int i = 0; i < args.length; ++i) {
-                try {
-                    if ("-r".equals(args[i])) {
-                        job.setNumReduceTasks(Integer.parseInt(args[++i]));
-                    } else {
-                        other_args.add(args[i]);
-                    }
-                } catch (NumberFormatException except) {
-                    System.out.println("ERROR: Integer expected instead of " + args[i]);
-                    return printUsage();
-                } catch (ArrayIndexOutOfBoundsException except) {
-                    System.out.println("ERROR: Required parameter missing from " +
-                            args[i - 1]);
-                    return printUsage();
+        Configuration conf = new Configuration();
+        Job job = Job.getInstance(conf, "Revenue count");
+        job.setJarByClass(RevenueCount.class);
+        job.setMapperClass(RevenueMapper.class);
+        //job.setCombinerClass(RevenueReducer.class);
+        job.setReducerClass(RevenueReducer.class);
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(Text.class);
+
+        List<String> other_args = new ArrayList<String>();
+        for (int i = 0; i < args.length; ++i) {
+            try {
+                if ("-r".equals(args[i])) {
+                    job.setNumReduceTasks(Integer.parseInt(args[++i]));
+                } else {
+                    other_args.add(args[i]);
                 }
-            }
-            // Make sure there are exactly 2 parameters left.
-            if (other_args.size() != 2) {
-                System.out.println("ERROR: Wrong number of parameters: " +
-                        other_args.size() + " instead of 2.");
+            } catch (NumberFormatException except) {
+                System.out.println("ERROR: Integer expected instead of " + args[i]);
+                return printUsage();
+            } catch (ArrayIndexOutOfBoundsException except) {
+                System.out.println("ERROR: Required parameter missing from " +
+                        args[i - 1]);
                 return printUsage();
             }
-            FileInputFormat.setInputPaths(job, other_args.get(0));
-            FileOutputFormat.setOutputPath(job, new Path(other_args.get(1)));
-            return (job.waitForCompletion(true) ? 0 : 1);
         }
+        // Make sure there are exactly 2 parameters left.
+        if (other_args.size() != 2) {
+            System.out.println("ERROR: Wrong number of parameters: " +
+                    other_args.size() + " instead of 2.");
+            return printUsage();
+        }
+        FileInputFormat.setInputPaths(job, other_args.get(0));
+        FileOutputFormat.setOutputPath(job, new Path(other_args.get(1)));
+        return (job.waitForCompletion(true) ? 0 : 1);
+    }
 
-        public static void main(String[] args) throws Exception {
-            int res = ToolRunner.run(new Configuration(), new RevenueCount(), args);
-            System.exit(res);
-        }
+    public static void main(String[] args) throws Exception {
+        int res = ToolRunner.run(new Configuration(), new RevenueCount(), args);
+        System.exit(res);
+    }
 }
